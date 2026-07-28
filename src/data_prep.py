@@ -1,16 +1,23 @@
+from pathlib import Path
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder
 
-def load_and_prepare(raw_path="../data/raw/hillstrom_data.csv", treatment_arm="Mens E-Mail", test_size=0.25, random_state=42, save_processed=True):
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+def load_and_prepare(raw_path=None, treatment_arm="Mens E-Mail", test_size=0.25, random_state=42, save_processed=True):
+    raw_path = Path(raw_path) if raw_path is not None else DATA_DIR / "raw" / "hillstrom_data.csv"
     raw_df = pd.read_csv(raw_path)
 
     filtered_df = raw_df[raw_df["segment"].isin([treatment_arm, "No E-Mail"])].copy()
     filtered_df["treatment"] = (filtered_df["segment"] == treatment_arm).astype(int)
 
     if save_processed:
-        filtered_df.to_csv("../data/processed/hillstrom_clean.csv", index=False)
+        processed_path = DATA_DIR / "processed" / "hillstrom_clean.csv"
+        processed_path.parent.mkdir(parents=True, exist_ok=True)
+        filtered_df.to_csv(processed_path, index=False)
 
     strat_key = filtered_df["treatment"].astype(str) + "_" + filtered_df["conversion"].astype(str)
     train_df, test_df = train_test_split(filtered_df, test_size=test_size, random_state=random_state, stratify=strat_key)

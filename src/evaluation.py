@@ -4,6 +4,11 @@ import matplotlib.pyplot as plt
 
 
 def _rank_by_score(uplift_scores, treatment, outcome):
+    # np.asarray so pandas Series index labels can't turn positional sorting
+    # into label-based lookups
+    uplift_scores = np.asarray(uplift_scores)
+    treatment = np.asarray(treatment)
+    outcome = np.asarray(outcome)
     sorted_indices = np.argsort(uplift_scores)[::-1]
 
     return uplift_scores[sorted_indices], treatment[sorted_indices], outcome[sorted_indices]
@@ -92,18 +97,21 @@ def uplift_by_decile(uplift_scores, treatment, outcome, n_deciles=10):
     return output
 
 
-def plot_uplift_by_decile(uplift_scores, treatment, outcome, ax=None):
+def plot_uplift_by_decile(uplift_scores, treatment, outcome, ax=None, label=None):
     uplift_df = uplift_by_decile(uplift_scores, treatment, outcome)
 
     if ax is None:
         fig, ax = plt.subplots()
 
     colors = np.where(uplift_df["observed_uplift"] < 0, "tab:red", "tab:blue")
-    ax.bar(uplift_df["decile"], uplift_df["observed_uplift"], color=colors)
+    ax.bar(uplift_df["decile"], uplift_df["observed_uplift"], color=colors, label=label)
     ax.axhline(0, color="black", linewidth=0.8)
     for row in uplift_df.itertuples():
         if row.observed_uplift < 0:
             print(f"Decile {row.decile} has negative uplift: {row.observed_uplift}")
+
+    if label is not None:
+        ax.legend()
 
     return ax
 
