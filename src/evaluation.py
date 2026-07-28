@@ -41,7 +41,7 @@ def qini_curve(uplift_scores, treatment, outcome):
     return pct_targeted, cumulative_gain, random_diagonal
 
 
-def plot_qini_curve(uplift_scores, treatment, outcome, label=None, ax=None):
+def plot_qini_curve(uplift_scores, treatment, outcome, outcome_name, label=None, ax=None):
     pct_targeted, cumulative_gain, random_diagonal = qini_curve(uplift_scores, treatment, outcome)
 
     if ax is None:
@@ -49,6 +49,8 @@ def plot_qini_curve(uplift_scores, treatment, outcome, label=None, ax=None):
 
     ax.plot(pct_targeted, cumulative_gain, label=label)
     ax.plot(pct_targeted, random_diagonal)
+
+    ax.set_title(outcome_name)
 
     if label is not None:
         ax.legend()
@@ -97,7 +99,7 @@ def uplift_by_decile(uplift_scores, treatment, outcome, n_deciles=10):
     return output
 
 
-def plot_uplift_by_decile(uplift_scores, treatment, outcome, ax=None, label=None):
+def plot_uplift_by_decile(uplift_scores, treatment, outcome, outcome_name, ax=None, label=None):
     uplift_df = uplift_by_decile(uplift_scores, treatment, outcome)
 
     if ax is None:
@@ -109,6 +111,8 @@ def plot_uplift_by_decile(uplift_scores, treatment, outcome, ax=None, label=None
     for row in uplift_df.itertuples():
         if row.observed_uplift < 0:
             print(f"Decile {row.decile} has negative uplift: {row.observed_uplift}")
+
+    ax.set_title(outcome_name)
 
     if label is not None:
         ax.legend()

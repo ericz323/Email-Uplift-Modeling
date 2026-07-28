@@ -7,7 +7,10 @@ from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-def load_and_prepare(raw_path=None, treatment_arm="Mens E-Mail", test_size=0.25, random_state=42, save_processed=True):
+def load_and_prepare(
+        raw_path=None, treatment_arm="Mens E-Mail",
+        test_size=0.25, random_state=42, save_processed=True
+):
     raw_path = Path(raw_path) if raw_path is not None else DATA_DIR / "raw" / "hillstrom_data.csv"
     raw_df = pd.read_csv(raw_path)
 
@@ -23,8 +26,9 @@ def load_and_prepare(raw_path=None, treatment_arm="Mens E-Mail", test_size=0.25,
     train_df, test_df = train_test_split(filtered_df, test_size=test_size, random_state=random_state, stratify=strat_key)
     X_train = train_df.drop(columns=["segment", "treatment", "visit", "conversion", "spend"])
     X_test = test_df.drop(columns=["segment", "treatment", "visit", "conversion", "spend"])
-    y_train = train_df["conversion"]
-    y_test = test_df["conversion"]
+    y_train = dict(visit = train_df["visit"], conversion = train_df["conversion"])
+    y_test = dict(visit = test_df["visit"], conversion = test_df["conversion"])
+
     t_train = train_df["treatment"]
     t_test = test_df["treatment"]
 
@@ -68,10 +72,12 @@ def load_and_prepare(raw_path=None, treatment_arm="Mens E-Mail", test_size=0.25,
 if __name__ == "__main__":
     X_train, X_test, y_train, y_test, t_train, t_test = load_and_prepare()
 
-    for df in [X_train, X_test, y_train, y_test, t_train, t_test]:
+    for df in [X_train, X_test, *y_train.values(), *y_test.values(), t_train, t_test]:
         print(df.shape)
 
-    print(y_train.mean())
-    print(y_test.mean())
+    for name, s in y_train.items():
+        print(f"train {name} rate: {s.mean()}")
+    for name, s in y_test.items():
+        print(f"test  {name} rate: {s.mean()}")
     print(t_train.mean())
     print(t_test.mean())
