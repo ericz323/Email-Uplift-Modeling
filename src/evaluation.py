@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def _rank_by_score(uplift_scores, treatment, outcome):
@@ -41,7 +42,7 @@ def qini_curve(uplift_scores, treatment, outcome):
     return pct_targeted, cumulative_gain, random_diagonal
 
 
-def plot_qini_curve(uplift_scores, treatment, outcome, outcome_name, label=None, ax=None):
+def plot_qini_curve(uplift_scores, treatment, outcome, outcome_name=None, label=None, ax=None):
     pct_targeted, cumulative_gain, random_diagonal = qini_curve(uplift_scores, treatment, outcome)
 
     if ax is None:
@@ -58,11 +59,49 @@ def plot_qini_curve(uplift_scores, treatment, outcome, outcome_name, label=None,
     return ax
 
 
+def sample_qini_curves(df, run_lookup, model, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    model_df = df[df["model"] == model]
+
+    max = model_df.loc[[df["qini_coefficient"].idxmax()]]
+    min = model_df.loc[[df["qini_coefficient"].idxmin()]]
+    median_index = (model_df["qini_coefficient"] - df["qini_coefficient"].median()).abs().idxmin()
+    median = model_df.loc[[median_index]]
+
+    for row_name, row in {"max": max, "median": median, "min": min}.items():
+        uplift_scores, treatment, outcome = run_lookup(row["split_seed"], row["model_seed"], model_type=model)
+
+        plot_qini_curve(
+            uplift_scores, treatment, outcome,
+            outcome_name=row["outcome"], label=f"{model} - {row_name}", ax=ax
+        )
+
+    return ax
+
+
 def qini_coefficient(uplift_scores, treatment, outcome):
     pct_targeted, cumulative_gain, random_diagonal = qini_curve(uplift_scores, treatment, outcome)
     qini_coefficient = np.trapezoid(y=cumulative_gain, x=pct_targeted) - np.trapezoid(y=random_diagonal, x=pct_targeted)
 
-    return qini_coefficient
+    return qini_coefficient / len(uplift_scores)
+
+
+def plot_qini_distribution(df, metric="qini_coefficient", ax=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    n_error = df["error"].notna().sum() if "error" in df else 0
+    if n_error:
+        print(f"Dropping {n_error} errored runs")
+
+    clean_df = df[df["error"].isna()].copy()
+
+    sns.violinplot(data=clean_df, x=metric, y="model", ax=ax)
+    sns.stripplot(data=clean_df, x=metric, y="model", ax=ax, alpha=0.4, jitter=True)
+
+    return ax
 
 
 def uplift_by_decile(uplift_scores, treatment, outcome, n_deciles=10):
