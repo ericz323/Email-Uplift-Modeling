@@ -42,16 +42,21 @@ def qini_curve(uplift_scores, treatment, outcome):
     return pct_targeted, cumulative_gain, random_diagonal
 
 
-def plot_qini_curve(uplift_scores, treatment, outcome, outcome_name=None, label=None, ax=None):
+def plot_qini_curve(
+        uplift_scores, treatment, outcome,
+        curve_color="b", diagonal_color="r",
+        outcome_name=None, label=None, ax=None, show_diagonal=True
+):
     pct_targeted, cumulative_gain, random_diagonal = qini_curve(uplift_scores, treatment, outcome)
 
     if ax is None:
         fig, ax = plt.subplots()
 
-    ax.plot(pct_targeted, cumulative_gain, label=label)
-    ax.plot(pct_targeted, random_diagonal)
+    ax.plot(pct_targeted, cumulative_gain, color=curve_color, label=label)
+    if show_diagonal:
+        ax.plot(pct_targeted, random_diagonal, color=diagonal_color)
 
-    ax.set_title(outcome_name)
+    ax.set_title(f"Qini Plot: {outcome_name}")
 
     if label is not None:
         ax.legend()
@@ -59,33 +64,93 @@ def plot_qini_curve(uplift_scores, treatment, outcome, outcome_name=None, label=
     return ax
 
 
-def sample_qini_curves(df, run_lookup, model, ax=None):
+def sample_qini_curves(df, run_lookup, model, curve_colors, diagonal_color, ax=None):
     if ax is None:
         fig, ax = plt.subplots()
 
     model_df = df[df["model"] == model]
 
-    max = model_df.loc[[df["qini_coefficient"].idxmax()]]
-    min = model_df.loc[[df["qini_coefficient"].idxmin()]]
-    median_index = (model_df["qini_coefficient"] - df["qini_coefficient"].median()).abs().idxmin()
-    median = model_df.loc[[median_index]]
+    best = model_df.loc[model_df["qini_coefficient"].idxmax()]
+    worst = model_df.loc[model_df["qini_coefficient"].idxmin()]
+    median_index = (model_df["qini_coefficient"] - model_df["qini_coefficient"].median()).abs().idxmin()
+    median = model_df.loc[median_index]
 
-    for row_name, row in {"max": max, "median": median, "min": min}.items():
+    for index, (row_name, row) in enumerate({"max": best, "median": median, "min": worst}.items()):
         uplift_scores, treatment, outcome = run_lookup(row["split_seed"], row["model_seed"], model_type=model)
 
+        show_diagonal = True if row_name == "median" else False
         plot_qini_curve(
             uplift_scores, treatment, outcome,
-            outcome_name=row["outcome"], label=f"{model} - {row_name}", ax=ax
+            outcome_name=row["outcome"], label=f"{model} - {row_name}",
+            curve_color=curve_colors[index], diagonal_color=diagonal_color, ax=ax, show_diagonal=show_diagonal
         )
+
 
     return ax
 
 
-def qini_coefficient(uplift_scores, treatment, outcome):
-    pct_targeted, cumulative_gain, random_diagonal = qini_curve(uplift_scores, treatment, outcome)
-    qini_coefficient = np.trapezoid(y=cumulative_gain, x=pct_targeted) - np.trapezoid(y=random_diagonal, x=pct_targeted)
+def _perfect_ranking(treatment, outcome):
+    """Scores for the ranking that maximizes the Qini curve on observed data.
 
-    return qini_coefficient / len(uplift_scores)
+    We never see both potential outcomes, so the oracle is defined over the four
+    observable cells rather than over true individual uplift. Ordering them:
+
+      (t=1, y=1)  treated responder      -- each one lifts the curve by 1
+      (t=0, y=0)  control non-responder  -- consistent with uplift, lifts by 0
+      (t=1, y=0)  treated non-responder  -- flat, but raises the treated/control
+                                            ratio, so it must come before...
+      (t=0, y=1)  control responder      -- each one pulls the curve back down
+
+    All four cells must appear, so every ranking ends at the same total gain;
+    the oracle is the one that rises fastest and falls last. Note this requires
+    knowing y at scoring time, so it is an upper bound no X-based model can hit.
+    """
+    treatment = np.asarray(treatment)
+    outcome = np.asarray(outcome)
+
+    return np.select(
+        [
+            (treatment == 1) & (outcome == 1),
+            (treatment == 0) & (outcome == 0),
+            (treatment == 1) & (outcome == 0),
+        ],
+        [3.0, 2.0, 1.0],
+        default=0.0,
+    )
+
+
+def qini_coefficient(uplift_scores, treatment, outcome, normalize=None):
+    """Area between the Qini curve and the random-targeting diagonal.
+
+    normalize:
+      None      -- raw area, in incremental-event units. Scales with sample size
+                   and base rate, so it is NOT comparable across outcomes.
+      "gain"    -- divide by the campaign's total incremental gain. Unitless,
+                   roughly [-0.5, 0.5]; the uplift analogue of a Gini. Reads as
+                   "how front-loaded the gain is under this ranking".
+      "perfect" -- divide by the best achievable curve on this data. Unitless,
+                   <= 1; reads as "fraction of attainable uplift captured".
+    """
+    pct_targeted, cumulative_gain, random_diagonal = qini_curve(uplift_scores, treatment, outcome)
+    raw = np.trapezoid(y=cumulative_gain, x=pct_targeted) - np.trapezoid(y=random_diagonal, x=pct_targeted)
+
+    if normalize is None:
+        return raw
+
+    if normalize == "gain":
+        total_gain = abs(cumulative_gain[-1])
+
+        return raw / total_gain if total_gain > 0 else np.nan
+
+    if normalize == "perfect":
+        perfect_pct, perfect_gain, perfect_diagonal = qini_curve(
+            _perfect_ranking(treatment, outcome), treatment, outcome
+        )
+        best = np.trapezoid(y=perfect_gain, x=perfect_pct) - np.trapezoid(y=perfect_diagonal, x=perfect_pct)
+
+        return raw / best if best > 0 else np.nan
+
+    raise ValueError(f"unknown normalize {normalize!r}")
 
 
 def plot_qini_distribution(df, metric="qini_coefficient", ax=None):
@@ -159,13 +224,15 @@ def plot_uplift_by_decile(uplift_scores, treatment, outcome, outcome_name, ax=No
     return ax
 
 
-def evaluate_model(model_name, uplift_scores, treatment, outcome):
-    qini_coef = qini_coefficient(uplift_scores, treatment, outcome)
+def evaluate_model(model_name, uplift_scores, treatment, outcome, normalize=None):
+    qini_coef = qini_coefficient(uplift_scores, treatment, outcome, normalize=normalize)
     decile_table = uplift_by_decile(uplift_scores, treatment, outcome)
 
     return {
         "model": model_name,
         "qini_coefficient": qini_coef,
+        "qini_gain_normalized": qini_coefficient(uplift_scores, treatment, outcome, normalize="gain"),
+        "qini_perfect_normalized": qini_coefficient(uplift_scores, treatment, outcome, normalize="perfect"),
         "top_decile_uplift": decile_table.loc[decile_table.decile == 1, "observed_uplift"].iloc[0],
         "bottom_decile_uplift": decile_table.loc[decile_table.decile == 10, "observed_uplift"].iloc[0],
         "monotonic": decile_table["observed_uplift"].is_monotonic_decreasing,

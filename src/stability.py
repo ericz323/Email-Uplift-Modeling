@@ -9,7 +9,7 @@ from src.uplift_trees import train_uplift_rf
 from src.meta_learners import run_x_learner
 from src.evaluation import evaluate_model, plot_qini_curve, plot_uplift_by_decile
 
-def _run_one(split_seed, model_seed, model_type, arm, outcome):
+def _run_one(split_seed, model_seed, model_type, arm, outcome, normalize=None):
     try:
         X_train, X_test, y_train, y_test, treatment_train, treatment_test = load_and_prepare(treatment_arm=arm, random_state=split_seed)
 
@@ -29,7 +29,7 @@ def _run_one(split_seed, model_seed, model_type, arm, outcome):
         else:
             raise ValueError(f"unknown model_type {model_type!r}")
 
-        results = evaluate_model(model_type, uplift_scores, treatment_test, y_test[outcome])
+        results = evaluate_model(model_type, uplift_scores, treatment_test, y_test[outcome], normalize=normalize)
 
         return {
             "split_seed": split_seed,
@@ -56,7 +56,9 @@ def run_stability_check(
         models=("T-Learner", "Uplift Trees", "X-Learner"),
         arm="Womens E-Mail",
         outcome="visit",
-        max_workers=12):
+        max_workers=12,
+        normalize=None
+):
     jobs = [
         (split_seed, model_seed, model_type)
         for split_seed in range(n_splits)
@@ -65,7 +67,7 @@ def run_stability_check(
     ]
     results = []
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_run_one, split_seed, model_seed, model_type, arm, outcome):
+        futures = {executor.submit(_run_one, split_seed, model_seed, model_type, arm, outcome, normalize):
                        (split_seed, model_seed, model_type) for split_seed, model_seed, model_type in jobs}
         for future in as_completed(futures):
             job = futures[future]
