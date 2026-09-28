@@ -32,7 +32,7 @@ notebooks/
 
 ## Running
 
-Everything imports as `src.<module>`, so run from the repository root.
+Run from repo root.
 
 Prepare the data and print split diagnostics:
 
